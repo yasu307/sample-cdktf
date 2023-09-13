@@ -193,7 +193,7 @@ class MyStack extends TerraformStack {
       vpcId:      Token.asString(vpc.id),
       healthCheck: {
         interval: 30,
-        path: '/',
+        path: '/ping',
         port: 'traffic-port',
         protocol: 'HTTP',
         timeout: 5,
@@ -235,7 +235,11 @@ class MyStack extends TerraformStack {
     });
 
     const ecrRepository = new EcrRepository(this, 'sample-cdktf-repository', {
-      name: 'project/sample-ecr'
+      name: 'project/ecr-for-aws-deploy'
+    });
+
+    const fluentBitEcr = new EcrRepository(this, 'sample-cdktf-fluentbit-repository', {
+      name: 'project/fluentbit'
     });
 
     const ecsTaskRole = new IamRole(this, 'ecsTaskRole', {
@@ -276,7 +280,8 @@ class MyStack extends TerraformStack {
               "cloudwatch:DescribeAlarms",
               "sns:Publish",
               "s3:GetObject",
-              "s3:GetObjectVersion"
+              "s3:GetObjectVersion",
+              "firehose:PutRecordBatch"
             ],
             "Resource": [
               "*"
@@ -351,11 +356,32 @@ class MyStack extends TerraformStack {
           }
         ],
         "logConfiguration": {
+          "logDriver":"awsfirelens",
+				  "options": {
+            "Name": "firehose",
+            "region": "ap-northeast-1",
+            "delivery_stream": "sample-cdktf-firehose"
+				  }
+        }
+      },
+      {
+        "essential": true,
+        "image": "${fluentBitEcr.repositoryUrl}:0.0.1",
+        "name": "log_router",
+        "firelensConfiguration": {
+          "type": "fluentbit",
+          "options": {
+            "config-file-type": "file",
+            "config-file-value": "/fluent-bit/etc/extra.conf"
+          }
+        },
+        "logConfiguration": {
           "logDriver": "awslogs",
           "options": {
-            "awslogs-group":         "/aws/ecs/task-for-cdktf",
-            "awslogs-stream-prefix": "ecs",
-            "awslogs-region":        "ap-northeast-1"
+            "awslogs-group": "/aws/ecs/firelens-container",
+            "awslogs-region": "ap-northeast-1",
+            "awslogs-create-group": "true",
+            "awslogs-stream-prefix": "firelens"
           }
         }
       }
@@ -534,6 +560,115 @@ class MyStack extends TerraformStack {
       arn:      snsTopic.arn,
       rule:     eventRule.name,
       targetId: 'SendToSNS'
+    });
+
+    new CloudwatchLogGroup(this, 'sample-cdktf-firelens-container-log-group', {
+      name: `/aws/ecs/firelens-container`
+    });
+
+    const firehoseRole = new IamRole(this, 'firehoseRole', {
+      name: 'sample-cdktf-firehoseRole',
+      assumeRolePolicy: `{
+        "Version":   "2012-10-17",
+        "Statement": [
+          {
+            "Action": "sts:AssumeRole",
+            "Principal": {
+              "Service": [
+                "firehose.amazonaws.com"
+              ]
+            },
+            "Effect": "Allow",
+            "Sid":    ""
+          }
+        ]
+      }`
+    });
+
+    const firehoseIamPolicy = new IamPolicy(this, 'sample-cdktf-firehose-iam-policy', {
+      name: 'sample-cdktf-firehose-iam-policy',
+      description: 'IAM policy for firehose',
+      policy: `{
+        "Version":   "2012-10-17",
+        "Statement": [
+          {
+            "Action": [
+              "es:DescribeElasticsearchDomain",
+              "es:DescribeElasticsearchDomains",
+              "es:DescribeElasticsearchDomainConfig",
+              "es:ESHttpPost",
+              "es:ESHttpPut",
+              "es:ESHttpGet",
+              "logs:PutLogEvents",
+              "s3:AbortMultipartUpload",
+              "s3:GetBucketLocation",
+              "s3:GetObject",
+              "s3:ListBucket",
+              "s3:ListBucketMultipartUploads",
+              "s3:PutObject"
+            ],
+            "Resource": [
+              "*"
+            ],
+            "Effect": "Allow"
+          }
+        ]
+      }`
+    });
+
+    new IamRolePolicyAttachment(this, 'attach-firehose-policy', {
+      role: firehoseRole.name,
+      policyArn: firehoseIamPolicy.arn
+    });
+
+    const firehoseS3Bucket = new S3Bucket(this, 'sample-cdktf-firehose-s3', {
+      bucket: 'sample-cdktf-firehose-s3'
+    });
+
+
+    const elasticsearchDomain = new ElasticsearchDomain(this, 'sample-cdktf-es-domain', {
+      domainName: 'sample-cdktf-es-domain',
+      elasticsearchVersion: '7.10',
+      clusterConfig: {
+        instanceType: 't3.medium.elasticsearch'
+      },
+      ebsOptions: {
+        ebsEnabled: true,
+        volumeType: "gp3",
+        volumeSize: 10,
+        throughput: 125
+      },
+      accessPolicies: `
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": "es:*",
+              "Principal": "*",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Condition": {
+                "IpAddress": { "aws:SourceIp": ["124.34.207.19"] }
+              }
+            }
+          ]
+        }`
+    });
+
+    new KinesisFirehoseDeliveryStream(this, 'sample-cdktf-firehose', {
+      name: 'sample-cdktf-firehose',
+      destination: 'opensearch',
+      opensearchConfiguration: {
+        domainArn: elasticsearchDomain.arn,
+        roleArn: firehoseRole.arn,
+        indexName: 'sample-cdktf',
+        s3Configuration: {
+          roleArn: firehoseRole.arn,
+          bucketArn: firehoseS3Bucket.arn,
+          bufferingSize: 10,
+          bufferingInterval: 400
+        }
+      },
     });
   }
 }

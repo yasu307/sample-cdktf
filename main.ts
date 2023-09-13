@@ -1,40 +1,39 @@
 import { Construct } from 'constructs';
 import { App, TerraformStack, Token } from 'cdktf';
-import { 
-  AwsProvider,
-  Vpc,
-  Subnet,
-  InternetGateway,
-  NatGateway, 
-  Eip,
-  RouteTable,
-  RouteTableAssociation,
-  SecurityGroup,
-  SecurityGroupRule,
-  Alb,
-  AlbTargetGroup,
-  AlbListener,
-  AlbListenerRule,
-  EcsCluster,
-  EcrRepository,
-  IamRole,
-  IamPolicy,
-  IamRolePolicyAttachment,
-  EcsTaskDefinition,
-  EcsService,
-  S3Bucket,
-  S3BucketObject,
-  LambdaFunction,
-  SnsTopic,
-  SnsTopicSubscription,
-  SnsTopicPolicy,
-  LambdaPermission,
-  CloudwatchLogGroup,
-  CloudwatchEventRule,
-  CloudwatchEventTarget
-} from './.gen/providers/aws';
-
 import * as path from 'path';
+import { AwsProvider } from '@cdktf/provider-aws/lib/provider';
+import { Vpc } from '@cdktf/provider-aws/lib/vpc';
+import { Subnet } from '@cdktf/provider-aws/lib/subnet';
+import { InternetGateway } from '@cdktf/provider-aws/lib/internet-gateway';
+import { Eip } from '@cdktf/provider-aws/lib/eip';
+import { NatGateway } from '@cdktf/provider-aws/lib/nat-gateway';
+import { RouteTable } from '@cdktf/provider-aws/lib/route-table';
+import { RouteTableAssociation } from '@cdktf/provider-aws/lib/route-table-association';
+import { SecurityGroup } from '@cdktf/provider-aws/lib/security-group';
+import { SecurityGroupRule } from '@cdktf/provider-aws/lib/security-group-rule';
+import { Alb } from '@cdktf/provider-aws/lib/alb';
+import { AlbTargetGroup } from '@cdktf/provider-aws/lib/alb-target-group';
+import { AlbListener } from '@cdktf/provider-aws/lib/alb-listener';
+import { AlbListenerRule } from '@cdktf/provider-aws/lib/alb-listener-rule';
+import { EcsCluster } from '@cdktf/provider-aws/lib/ecs-cluster';
+import { EcrRepository } from '@cdktf/provider-aws/lib/ecr-repository';
+import { IamRole } from '@cdktf/provider-aws/lib/iam-role';
+import { IamPolicy } from '@cdktf/provider-aws/lib/iam-policy';
+import { IamRolePolicyAttachment } from '@cdktf/provider-aws/lib/iam-role-policy-attachment';
+import { EcsTaskDefinition } from '@cdktf/provider-aws/lib/ecs-task-definition';
+import { EcsService } from '@cdktf/provider-aws/lib/ecs-service';
+import { S3Bucket } from '@cdktf/provider-aws/lib/s3-bucket';
+import { S3BucketObject } from '@cdktf/provider-aws/lib/s3-bucket-object';
+import { LambdaFunction } from '@cdktf/provider-aws/lib/lambda-function';
+import { SnsTopic } from '@cdktf/provider-aws/lib/sns-topic';
+import { SnsTopicSubscription } from '@cdktf/provider-aws/lib/sns-topic-subscription';
+import { SnsTopicPolicy } from '@cdktf/provider-aws/lib/sns-topic-policy';
+import { LambdaPermission } from '@cdktf/provider-aws/lib/lambda-permission';
+import { CloudwatchLogGroup } from '@cdktf/provider-aws/lib/cloudwatch-log-group';
+import { CloudwatchEventRule } from '@cdktf/provider-aws/lib/cloudwatch-event-rule';
+import { CloudwatchEventTarget } from '@cdktf/provider-aws/lib/cloudwatch-event-target';
+import { KinesisFirehoseDeliveryStream } from '@cdktf/provider-aws/lib/kinesis-firehose-delivery-stream';
+import { ElasticsearchDomain } from '@cdktf/provider-aws/lib/elasticsearch-domain';
 
 class MyStack extends TerraformStack {
   constructor(scope: Construct, name: string) {
@@ -104,9 +103,7 @@ class MyStack extends TerraformStack {
       route: [{
         cidrBlock:              '0.0.0.0/0',
         gatewayId:              Token.asString(internetGateway.id),
-        ipv6CidrBlock:          '',
         egressOnlyGatewayId:    '',
-        instanceId:             '',
         natGatewayId:           '',
         networkInterfaceId:     '',
         transitGatewayId:       '',
@@ -120,9 +117,7 @@ class MyStack extends TerraformStack {
       route: [{
         cidrBlock:              '0.0.0.0/0',
         gatewayId:              '',
-        ipv6CidrBlock:          '',
         egressOnlyGatewayId:    '',
-        instanceId:             '',
         natGatewayId:           Token.asString(natGateway.id),
         networkInterfaceId:     '',
         transitGatewayId:       '',
@@ -196,14 +191,14 @@ class MyStack extends TerraformStack {
       protocol:   'HTTP',
       targetType: 'ip',
       vpcId:      Token.asString(vpc.id),
-      healthCheck: [{
+      healthCheck: {
         interval: 30,
         path: '/',
         port: 'traffic-port',
         protocol: 'HTTP',
         timeout: 5,
-        unhealthyThreshold: 2
-      }],
+        unhealthyThreshold: 2,
+      },
       dependsOn: [alb]
     });
 
@@ -213,11 +208,11 @@ class MyStack extends TerraformStack {
       protocol:        'HTTP',
       defaultAction: [{
         type: 'fixed-response',
-        fixedResponse: [{
+        fixedResponse: {
           contentType: 'text/plain',
           messageBody: 'OK',
           statusCode:  '200'
-        }]
+        }
       }]
     });
 
@@ -229,8 +224,9 @@ class MyStack extends TerraformStack {
         targetGroupArn: albTargetGroup.arn
       }],
       condition: [{
-        field: 'path-pattern',
-        values: ['*']
+        pathPattern: {
+          values: ['*']
+        }
       }]
     });
 
@@ -385,10 +381,10 @@ class MyStack extends TerraformStack {
       name:                            'sample-cdktf-ecs-service',
       platformVersion:                 'LATEST',
       taskDefinition:                  Token.asString(ecsTaskDefinition.id),
-      networkConfiguration: [{
+      networkConfiguration: {
         securityGroups: [Token.asString(vpc.defaultSecurityGroupId)],
         subnets: [Token.asString(privateSubnet1.id), Token.asString(privateSubnet2.id)]
-      }],
+      },
       loadBalancer: [{
         containerName:  'sample-cdktf-container',
         containerPort:  9000,
@@ -397,8 +393,7 @@ class MyStack extends TerraformStack {
     });
 
     const s3Bucket = new S3Bucket(this, 'sample-cdktf-s3', {
-      bucket: 'sample-cdktf-s3',
-      region: 'ap-northeast-1'
+      bucket: 'sample-cdktf-s3'
     });
 
     const s3BucketObject = new S3BucketObject(this, 'notification-to-Slack-dist.zip', {
@@ -464,16 +459,16 @@ class MyStack extends TerraformStack {
       functionName: 'Sample-Lambda-Notification-to-Slack',
       handler:      'index.handler',
       role:         lambdaExecutionRole.arn,
-      runtime:      'nodejs12.x',
+      runtime:      'nodejs14.x',
       s3Bucket:     s3Bucket.bucket,
       s3Key:        s3BucketObject.key,
       timeout:      30,
-      environment: [{
+      environment: {
         variables: {
           ['SLACK_API_TOKEN']: 'xoxb-xxxxxxxxxxxxx',
           ['SLACK_CHANNEL']:   'xxxxxxxx'
         }
-      }]
+      }
     });
 
     const snsTopic = new SnsTopic(this, 'sample-cdktf-sns', {
